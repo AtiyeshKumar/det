@@ -1,20 +1,20 @@
 import './globals.css';
-import { Inter } from 'next/font/google';
-import Navbar from '../components/Navbar';
-
-const inter = Inter({ subsets: ['latin'] });
+import AuthProvider from "@/components/SessionProvider";
+import Navbar from "@/components/Navbar";
 
 export const metadata = {
-  title: 'Decentralized AI Truth Detector',
-  description: 'Verify news with decentralized AI analysis.',
+  title: "Truth Detector AI",
+  description: "Verify rumors with AI",
 };
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body className={inter.className}>
-        <Navbar />
-        {children}
+      <body className="antialiased text-slate-200 bg-slate-900">
+        <AuthProvider>
+          <Navbar />
+          {children}
+        </AuthProvider>
       </body>
     </html>
   );

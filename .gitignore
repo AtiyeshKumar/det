@@ -1,0 +1,14 @@
+# Node & Next.js
+node_modules/
+.next/
+
+# Python & Backend
+__pycache__/
+venv/
+env/
+
+# Secrets & Databases
+.env
+.env.local
+*.db
+truth_detector.db

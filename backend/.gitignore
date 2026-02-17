@@ -8,7 +8,10 @@ node_modules
 
 # OS
 .DS_Store
-node_modules/
-.next/
-.env.local
+
+__pycache__/
+venv/
+env/
+*.db
+truth_detector.db
 .env
