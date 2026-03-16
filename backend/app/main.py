@@ -3,12 +3,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uuid
 import json
+import os
+import tempfile
+import shutil
 from google import genai
 from google.genai import types
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 import PIL.Image
 import io
+from ddgs import DDGS
+
+# ── Deepfake forensics ──────────────────────────────────────────────────────
+from .forensics import analyze_pixels, load_detector
+
+# Loaded once at server startup so every request is fast
+_deepfake_detector = None
 
 # IMPORTANT: Use relative import
 from .database import SessionLocal, Prediction, Vote
@@ -23,6 +33,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def startup_load_models():
+    """Pre-load the ViT deepfake detector onto the GPU when the server starts."""
+    global _deepfake_detector
+    print("[STARTUP] Loading deepfake ViT model onto GPU …")
+    _deepfake_detector = load_detector(device=0)
+    print("[STARTUP] Deepfake detector ready. ✅")
 
 # -------------------------
 # Database Dependency
@@ -40,7 +59,7 @@ def get_db():
 print("Loading Gemini Cloud AI...")
 
 # 🛑 PASTE YOUR SECRET API KEY IN THE QUOTES BELOW!
-GEMINI_API_KEY = "AIzaSyBv5PPAlht96ExFBzO7vc_yY5glwLNYMAM"
+GEMINI_API_KEY = "AIzaSyAQoctQr9fUSP_a1n2EPsF6AC8fp8Vahw8"
 
 try:
     client = genai.Client(api_key=GEMINI_API_KEY)
@@ -59,9 +78,29 @@ class VoteInput(BaseModel):
     user_vote: str
 
 
-from duckduckgo_search import DDGS
 
-# ... (rest of imports)
+# -------------------------
+# RAG: Live Web Search
+# -------------------------
+def fetch_live_news(claim: str) -> str:
+    """
+    Searches DuckDuckGo for the given claim and returns a clean string
+    containing the snippets of the top 3 results.
+    """
+    try:
+        with DDGS() as ddgs:
+            results = list(ddgs.text(claim, max_results=3))
+        if not results:
+            return "No live web results found."
+        snippets = []
+        for i, res in enumerate(results, 1):
+            snippets.append(f"{i}. {res.get('title', '')}\n   {res.get('body', '')}")
+        context_text = "\n\n".join(snippets)
+        print(f"\n📰 LIVE NEWS CONTEXT FETCHED:\n{context_text}\n")
+        return context_text
+    except Exception as e:
+        print(f"⚠️ fetch_live_news failed: {e}")
+        return f"Web search unavailable: {e}"
 
 # -------------------------
 # Predict Endpoint
@@ -84,47 +123,33 @@ async def predict_news(
     text_content = text.strip() if text else ""
     
     # --- RAG: Live Web Search ---
-    search_context = ""
+    live_news_context = ""
     if text_content:
         print(f"🔍 Searching DuckDuckGo for: {text_content[:50]}...")
-        try:
-            with DDGS() as ddgs:
-                results = list(ddgs.text(text_content, max_results=5))
-                if results:
-                    search_context = "SEARCH_ENGINE_CONTEXT:\n"
-                    for i, res in enumerate(results, 1):
-                        search_context += f"{i}. Title: {res['title']}\n   Snippet: {res['body']}\n   Link: {res['href']}\n"
-                    print(f"✅ Found {len(results)} search results.")
-                else:
-                    print("⚠️ No search results found.")
-        except Exception as e:
-            print(f"⚠️ Search failed: {e}")
+        live_news_context = fetch_live_news(text_content)
+        print(f"✅ Live news context fetched.")
 
     try:
         # Prepare inputs for Gemini
         gemini_inputs = []
         
         # Add text prompt context with RAG instructions
-        base_prompt = f"""
-        You are an elite fact-checking AI with access to the live web. 
-        
-        Primary Directive: You MUST prioritize the provided SEARCH_ENGINE_CONTEXT over your internal training data.
-        
-        {search_context}
-        
-        Analyze the following claim or news snippet (and optional image).
-        If the search results indicate a claim is true (e.g. confirms a recent event), mark it as REAL.
-        If they contradict it, mark it as FAKE.
-        
-        Return ONLY a valid JSON object.
-        Format: {{"label": "FAKE" or "REAL", "fake_probability": 0.0 to 1.0, "reasoning": "Brief explanation citing search results if available"}}
-        (fake_probability should be close to 1.0 if it's Fake, and close to 0.0 if it's Real).
+        base_prompt = f"""You are a Truth Detector AI. You must use the following live web search context to verify the user's claim. If the live news proves the claim is true, you must override your internal knowledge cutoff date and output a TRUE verdict. \n\nLIVE WEB CONTEXT:\n{live_news_context}\n\nUSER CLAIM: {text_content}
+
+        You MUST return ONLY a valid JSON object with exactly these three fields:
+        {{
+          "label": "FAKE" or "REAL",
+          "confidence_score": <INTEGER between 0 and 100 — your confidence in the verdict, always above 50>,
+          "reasoning": "Brief explanation citing search results if available"
+        }}
+
+        CRITICAL RULES:
+        - "confidence_score" MUST be a plain JSON integer (e.g. 87), NOT a float, NOT a string.
+        - It represents how confident you are in the verdict (FAKE or REAL), so it should be between 50 and 99.
+        - Do NOT include any other fields. Do NOT wrap the JSON in markdown.
         """
         
         gemini_inputs.append(base_prompt)
-
-        if text_content:
-            gemini_inputs.append(f"Claim to analyze: {text_content}")
 
         if file:
             print(f"📸 Processing uploaded image: {file.filename}")
@@ -153,18 +178,17 @@ async def predict_news(
         
         # Extract the values safely
         label = result_data.get("label", "FAKE").upper()
-        fake_score = float(result_data.get("fake_probability", 0.0))
+        confidence_score = int(result_data.get("confidence_score", 75))
         reasoning = result_data.get("reasoning", "No reasoning provided.")
 
         prediction_id = str(uuid.uuid4())
-        fake_prob_rounded = round(fake_score, 4)
 
         # Save prediction to DB
         new_prediction = Prediction(
             id=prediction_id,
-            text=text_content, 
+            text=text_content,
             ai_label=label,
-            fake_probability=fake_prob_rounded,
+            fake_probability=confidence_score / 100.0,
             reasoning=reasoning
         )
 
@@ -173,14 +197,14 @@ async def predict_news(
 
         return {
             "id": prediction_id,
-            "fake_probability": fake_prob_rounded,
+            "confidence_score": confidence_score,
             "label": label,
             "reasoning": reasoning
         }
 
     except Exception as e:
         print(f"🔥 Prediction failed: {e}")
-        return {"id": str(uuid.uuid4()), "fake_probability": 0.0, "label": "ERROR", "reasoning": str(e)}
+        return {"id": str(uuid.uuid4()), "confidence_score": 0, "label": "ERROR", "reasoning": str(e)}
 
 # -------------------------
 # Vote Endpoint
@@ -222,3 +246,70 @@ def get_platform_stats(db: Session = Depends(get_db)):
     except Exception as e:
         print(f"🔥 Stats error: {e}")
         raise HTTPException(status_code=500, detail="Could not fetch statistics")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Deepfake Image Analysis Endpoint
+# ─────────────────────────────────────────────────────────────────────────────
+@app.post("/api/analyze-image")
+async def analyze_image_endpoint(file: UploadFile = File(...)):
+    """
+    Accepts a JPEG/PNG upload, runs it through the local ViT deepfake detector,
+    and returns Deepfake + Realism confidence scores as percentages.
+    """
+    # ── 1. Validate content type ──────────────────────────────────────────────
+    allowed = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+    if file.content_type not in allowed:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported file type '{file.content_type}'. Please upload JPEG or PNG.",
+        )
+
+    # ── 2. Save upload to a temp file ─────────────────────────────────────────
+    suffix = os.path.splitext(file.filename or "upload.jpg")[1] or ".jpg"
+    tmp_path: str | None = None
+
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            shutil.copyfileobj(file.file, tmp)
+            tmp_path = tmp.name
+
+        print(f"[analyze-image] Saved temp file → {tmp_path}")
+
+        # ── 3. Run inference ──────────────────────────────────────────────────
+        raw_scores: dict = analyze_pixels(tmp_path, detector=_deepfake_detector)
+
+        print(f"[analyze-image] Raw scores: {raw_scores}")
+
+    except Exception as exc:
+        print(f"[analyze-image] 🔥 Inference error: {exc}")
+        raise HTTPException(status_code=500, detail=f"Inference failed: {exc}")
+
+    finally:
+        # ── 4. Delete temp file no matter what ───────────────────────────────
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+            print(f"[analyze-image] Temp file deleted ✅")
+
+    # ── 5. Normalise labels and build response ────────────────────────────────
+    # The model may return 'Deepfake' / 'Realism' or similar casing — normalise.
+    def _find_score(raw: dict, keyword: str) -> float:
+        """Case-insensitive lookup and return as a rounded percentage."""
+        for key, val in raw.items():
+            if keyword.lower() in key.lower():
+                return round(float(val) * 100, 2)
+        return 0.0
+
+    deepfake_pct = _find_score(raw_scores, "fake")
+    realism_pct  = _find_score(raw_scores, "real")
+
+    verdict = "DEEPFAKE" if deepfake_pct > realism_pct else "REAL"
+
+    return {
+        "verdict": verdict,
+        "scores": {
+            "Deepfake": deepfake_pct,
+            "Realism":  realism_pct,
+        },
+        "filename": file.filename,
+    }

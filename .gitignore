@@ -2,13 +2,31 @@
 node_modules/
 .next/
 
-# Python & Backend
-__pycache__/
-venv/
-env/
-
 # Secrets & Databases
 .env
 .env.local
 *.db
 truth_detector.db
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+env/
+
+# ── Large ML / Dataset files (DO NOT commit) ──
+backend/Dataset/
+backend/dataset_backup/
+backend/webcam_lora_weights/
+backend/webcam_lora_weights_100k/
+
+# Test images
+backend/test.jpg.png
+
+# VS Code
+.vscode/

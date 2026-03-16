@@ -27,11 +27,7 @@ export default function ResultPage() {
     );
   }
 
-  const confidenceDecimal = result.label === "FAKE" 
-    ? result.fake_probability 
-    : (1 - result.fake_probability);
-    
-  const percent = Number((confidenceDecimal * 100).toFixed(2));
+  const percent = result.confidence_score ?? 0;
 
   const submitVote = async (userVote) => {
     try {
@@ -56,7 +52,7 @@ export default function ResultPage() {
   return (
     <div className="flex flex-col items-center justify-center min-h-[85vh] px-4 w-full">
       <div className="bg-gray-900 border border-gray-800 p-10 rounded-2xl shadow-2xl w-full max-w-xl flex flex-col items-center text-center">
-        
+
         <h1 className={`text-4xl font-extrabold mb-4 ${result.label === "FAKE" ? "text-red-500" : "text-green-500"}`}>
           {result.label === "FAKE" ? "LIKELY FAKE NEWS" : "LIKELY REAL NEWS"}
         </h1>
