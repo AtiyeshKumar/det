@@ -16,7 +16,7 @@ export default function HomePage() {
     // Fetch live stats from your FastAPI database
     const fetchStats = async () => {
       try {
-        const response = await fetch("http://127.0.0.1:8000/stats");
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/stats`);
         if (response.ok) {
           const data = await response.json();
           setStats(data.data);

@@ -119,7 +119,7 @@ export default function TruthDetector() {
     if (imageFile) formData.append("file", imageFile);
 
     try {
-      const response = await fetch("http://localhost:8000/predict", {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/predict`, {
         method: "POST",
         body: formData,
       });

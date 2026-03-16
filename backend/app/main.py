@@ -27,10 +27,11 @@ from .database import SessionLocal, Prediction, Vote
 
 app = FastAPI()
 
-# CORS
+# CORS — allow both local dev and production Vercel frontend
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:3000", FRONTEND_URL],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -39,11 +40,8 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_load_models():
-    """Pre-load the ViT deepfake detector onto the GPU when the server starts."""
-    global _deepfake_detector
-    print("[STARTUP] Loading deepfake ViT model onto GPU …")
-    _deepfake_detector = load_detector(device=0)
-    print("[STARTUP] Deepfake detector ready. ✅")
+    """Skip loading deepfake model at startup — loaded lazily on first request."""
+    print("[STARTUP] Deepfake model will load lazily on first request.")
 
 # -------------------------
 # Database Dependency
