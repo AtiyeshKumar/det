@@ -6,6 +6,8 @@ import json
 import os
 import tempfile
 import shutil
+from dotenv import load_dotenv
+load_dotenv()
 from google import genai
 from google.genai import types
 from sqlalchemy.orm import Session
@@ -58,8 +60,7 @@ def get_db():
 # -------------------------
 print("Loading Gemini Cloud AI...")
 
-# 🛑 PASTE YOUR SECRET API KEY IN THE QUOTES BELOW!
-GEMINI_API_KEY = "AIzaSyAQoctQr9fUSP_a1n2EPsF6AC8fp8Vahw8"
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 try:
     client = genai.Client(api_key=GEMINI_API_KEY)

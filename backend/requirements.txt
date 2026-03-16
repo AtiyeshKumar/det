@@ -5,3 +5,4 @@ google-generativeai
 pillow
 python-multipart
 ddgs
+python-dotenv
