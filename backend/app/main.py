@@ -173,7 +173,7 @@ async def predict_news(
         
         # Call the Gemini 2.5 Flash model
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-2.0-flash',
             contents=gemini_inputs,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
