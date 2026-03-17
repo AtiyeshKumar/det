@@ -7,6 +7,3 @@ python-multipart
 ddgs
 python-dotenv
 sqlalchemy
-torch --index-url https://download.pytorch.org/whl/cpu
-transformers
-peft

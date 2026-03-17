@@ -16,8 +16,13 @@ import PIL.Image
 import io
 from ddgs import DDGS
 
-# ── Deepfake forensics ──────────────────────────────────────────────────────
-from .forensics import analyze_pixels, load_detector
+# ── Deepfake forensics (optional — disabled if torch not installed) ──────────
+try:
+    from .forensics import analyze_pixels, load_detector
+    DEEPFAKE_AVAILABLE = True
+except ImportError:
+    DEEPFAKE_AVAILABLE = False
+    print("[INFO] Deepfake module not available (torch not installed). Deepfake endpoint disabled.")
 
 # Loaded once at server startup so every request is fast
 _deepfake_detector = None
