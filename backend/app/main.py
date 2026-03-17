@@ -34,9 +34,14 @@ app = FastAPI()
 
 # CORS — allow both local dev and production Vercel frontend
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+allowed_origins = [
+    "http://localhost:3000",
+    "https://det-gamma.vercel.app",
+    FRONTEND_URL,
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", FRONTEND_URL],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
